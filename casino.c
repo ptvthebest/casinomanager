@@ -1,36 +1,47 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "casino.h"
+#include <errno.h>
+#include <string.h>
 
-Player players[100];
-Game games[100];
+Player* players = NULL;
+Game* games = NULL;
 int playerCount = 0;
 int gameCount = 0;
 int nextPlayerID = 1;
 int nextGameID = 1;
 
+void freeMemory() {
+    free(players);
+    free(games);
+    players = NULL;
+    games = NULL;
+}
+
 
 void addPlayer() {
-    if (playerCount >= 100) {
-        printf("Maksimalan broj igraca dosegnut.\n");
-        return;
+    Player* tmp = realloc(players, (playerCount + 1) * sizeof(Player));
+    if (!tmp) {
+        perror("Neuspješno alociranje memorije za igrače");
+        exit(EXIT_FAILURE);
     }
+    players = tmp;
 
-    Player p;
-    p.playerID = nextPlayerID++;
-    printf("Unesite ime: ");
-    scanf("%49s", p.firstName);
-    printf("Unesite prezime: ");
-    scanf("%49s", p.lastName);
+    Player* p = &players[playerCount];
+    p->playerID = nextPlayerID++;
+    printf("Unesite ime igrača: ");
+    (void)scanf("%49s", p->firstName);
+    printf("Unesite prezime igrača: ");
+    (void)scanf("%49s", p->lastName);
     printf("Unesite saldo: ");
-    scanf("%lf", &p.balance);
+    (void)scanf("%lf", &p->balance);
 
-    players[playerCount++] = p;
+    playerCount++;
     savePlayers();
-    printf("Igrac dodan.\n");
+    printf("Igrač dodan: %s %s (ID: %d)\n", p->firstName, p->lastName, p->playerID);
 }
 
 void listPlayers() {
-    printf("\n--- Lista Igraca ---\n");
+    printf("\nLista svih igrača:\n");
     for (int i = 0; i < playerCount; i++) {
         printf("%d. %s %s - Saldo: %.2lf\n",
             players[i].playerID,
@@ -42,25 +53,25 @@ void listPlayers() {
 
 void updatePlayer() {
     int id;
-    printf("Unesite ID igraca za azuriranje: ");
-    scanf("%d", &id);
+    printf("Unesite ID igrača za ažuriranje: ");
+    (void)scanf("%d", &id);
 
     for (int i = 0; i < playerCount; i++) {
         if (players[i].playerID == id) {
-            printf("Unesite novo saldo: ");
-            scanf("%lf", &players[i].balance);
+            printf("Unesite novi saldo: ");
+            (void)scanf("%lf", &players[i].balance);
             savePlayers();
-            printf("Saldo azurirano.\n");
+            printf("Igrač ažuriran.\n");
             return;
         }
     }
-    printf("Igrac nije pronaden.\n");
+    printf("Igrač s tim ID-om nije pronađen.\n");
 }
 
 void deletePlayer() {
     int id;
-    printf("Unesite ID igraca za brisanje: ");
-    scanf("%d", &id);
+    printf("Unesite ID igrača za brisanje: ");
+    (void)scanf("%d", &id);
 
     for (int i = 0; i < playerCount; i++) {
         if (players[i].playerID == id) {
@@ -69,78 +80,105 @@ void deletePlayer() {
             }
             playerCount--;
             savePlayers();
-            printf("Igrac obrisan.\n");
+            printf("Igrač obrisan.\n");
             return;
         }
     }
-    printf("Igrac nije pronaden.\n");
+    printf("Igrač s tim ID-om nije pronađen.\n");
 }
 
 void savePlayers() {
-    FILE* f = fopen("players.dat", "wb");
-    if (!f) return;
-    fwrite(&playerCount, sizeof(int), 1, f);
-    fwrite(players, sizeof(Player), playerCount, f);
-    fclose(f);
+    FILE* file = fopen("players.dat", "wb");
+    if (!file) {
+        perror("Greška pri otvaranju datoteke za zapis igrača");
+        return;
+    }
+    fwrite(&playerCount, sizeof(int), 1, file);
+    fwrite(players, sizeof(Player), playerCount, file);
+    fclose(file);
 }
 
 void loadPlayers() {
-    FILE* f = fopen("players.dat", "rb");
-    if (!f) return;
-    fread(&playerCount, sizeof(int), 1, f);
-    fread(players, sizeof(Player), playerCount, f);
+    FILE* file = fopen("players.dat", "rb");
+    if (!file) return;
+    fread(&playerCount, sizeof(int), 1, file);
+    players = malloc(playerCount * sizeof(Player));
+    if (!players && playerCount > 0) {
+        perror("Neuspješno učitavanje memorije za igrače");
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+    fread(players, sizeof(Player), playerCount, file);
     nextPlayerID = playerCount > 0 ? players[playerCount - 1].playerID + 1 : 1;
-    fclose(f);
+    fclose(file);
+}
+
+int compareByBalance(const void* a, const void* b) {
+    double balanceA = ((Player*)a)->balance;
+    double balanceB = ((Player*)b)->balance;
+    return (balanceA > balanceB) - (balanceA < balanceB);
 }
 
 void sortPlayers() {
-    int choice;
-    printf("Sortirati po:\n1. Ime\n2. Prezime\n3. Saldo\nOdabir: ");
-    scanf("%d", &choice);
-
-    for (int i = 0; i < playerCount - 1; i++) {
-        for (int j = 0; j < playerCount - i - 1; j++) {
-            int swap = 0;
-            if ((choice == 1 && strcmp(players[j].firstName, players[j + 1].firstName) > 0) ||
-                (choice == 2 && strcmp(players[j].lastName, players[j + 1].lastName) > 0) ||
-                (choice == 3 && players[j].balance > players[j + 1].balance)) {
-                swap = 1;
-            }
-            if (swap) {
-                Player temp = players[j];
-                players[j] = players[j + 1];
-                players[j + 1] = temp;
-            }
-        }
-    }
-
-    printf("Sortirano.\n");
+    qsort(players, playerCount, sizeof(Player), compareByBalance);
+    printf("Igrači sortirani po saldu.\n");
     listPlayers();
+}
+
+Player* searchPlayerBinary(int id) {
+    int low = 0, high = playerCount - 1;
+    while (low <= high) {
+        int mid = low + (high - low) / 2;
+        if (players[mid].playerID == id)
+            return &players[mid];
+        else if (players[mid].playerID < id)
+            low = mid + 1;
+        else
+            high = mid - 1;
+    }
+    return NULL;
+}
+
+void recursivePrintPlayers(int index) {
+    if (index >= playerCount)
+        return;
+    printf("%d. %s %s - Saldo: %.2lf\n",
+        players[index].playerID,
+        players[index].firstName,
+        players[index].lastName,
+        players[index].balance);
+    recursivePrintPlayers(index + 1);
+}
+
+Player* findPlayerByID(int id) {
+    return searchPlayerBinary(id);
 }
 
 
 void addGame() {
-    if (gameCount >= 100) {
-        printf("Maksimalan broj igara dosegnut.\n");
-        return;
+    Game* tmp = realloc(games, (gameCount + 1) * sizeof(Game));
+    if (!tmp) {
+        perror("Neuspješno alociranje memorije za igre");
+        exit(EXIT_FAILURE);
     }
+    games = tmp;
 
-    Game g;
-    g.gameID = nextGameID++;
+    Game* g = &games[gameCount];
+    g->gameID = nextGameID++;
     printf("Unesite ime igre: ");
-    scanf("%49s", g.gameName);
+    (void)scanf("%49s", g->gameName);
     printf("Unesite minimalnu okladu: ");
-    scanf("%lf", &g.minBet);
+    (void)scanf("%lf", &g->minBet);
     printf("Unesite maksimalnu okladu: ");
-    scanf("%lf", &g.maxBet);
+    (void)scanf("%lf", &g->maxBet);
 
-    games[gameCount++] = g;
+    gameCount++;
     saveGames();
-    printf("Igra dodana.\n");
+    printf("Igra dodana: %s (ID: %d)\n", g->gameName, g->gameID);
 }
 
 void listGames() {
-    printf("\n--- Lista Igara ---\n");
+    printf("\nLista svih igara:\n");
     for (int i = 0; i < gameCount; i++) {
         printf("%d. %s - Min: %.2lf, Max: %.2lf\n",
             games[i].gameID,
@@ -150,31 +188,74 @@ void listGames() {
     }
 }
 
-void saveGames() {
-    FILE* f = fopen("games.dat", "wb");
-    if (!f) return;
-    fwrite(&gameCount, sizeof(int), 1, f);
-    fwrite(games, sizeof(Game), gameCount, f);
-    fclose(f);
+void updateGame() {
+    int id;
+    printf("Unesite ID igre za ažuriranje: ");
+    (void)scanf("%d", &id);
+    for (int i = 0; i < gameCount; i++) {
+        if (games[i].gameID == id) {
+            printf("Unesite novo ime igre (trenutno: %s): ", games[i].gameName);
+            (void)scanf("%49s", games[i].gameName);
+            printf("Unesite novi minimalni ulog (trenutno: %.2lf): ", games[i].minBet);
+            (void)scanf("%lf", &games[i].minBet);
+            printf("Unesite novi maksimalni ulog (trenutno: %.2lf): ", games[i].maxBet);
+            (void)scanf("%lf", &games[i].maxBet);
+            saveGames();
+            printf("Igra ažurirana.\n");
+            return;
+        }
+    }
+    printf("Igra s tim ID-om nije pronađena.\n");
 }
 
+void deleteGame() {
+    int id;
+    printf("Unesite ID igre za brisanje: ");
+    (void)scanf("%d", &id);
+    for (int i = 0; i < gameCount; i++) {
+        if (games[i].gameID == id) {
+            for (int j = i; j < gameCount - 1; j++) {
+                games[j] = games[j + 1];
+            }
+            gameCount--;
+            saveGames();
+            printf("Igra obrisana.\n");
+            return;
+        }
+    }
+    printf("Igra s tim ID-om nije pronađena.\n");
+}
+
+void saveGames() {
+    FILE* file = fopen("games.dat", "wb");
+    if (!file) {
+        perror("Greška pri zapisu igara");
+        return;
+    }
+    fwrite(&gameCount, sizeof(int), 1, file);
+    fwrite(games, sizeof(Game), gameCount, file);
+    fclose(file);
+}
 
 void loadGames() {
-    FILE* f = fopen("games.dat", "rb");
-    if (!f) return;
-    fread(&gameCount, sizeof(int), 1, f);
-    fread(games, sizeof(Game), gameCount, f);
+    FILE* file = fopen("games.dat", "rb");
+    if (!file) return;
+    fread(&gameCount, sizeof(int), 1, file);
+    games = malloc(gameCount * sizeof(Game));
+    if (!games && gameCount > 0) {
+        perror("Neuspješno učitavanje memorije za igre");
+        fclose(file);
+        exit(EXIT_FAILURE);
+    }
+    fread(games, sizeof(Game), gameCount, file);
     nextGameID = gameCount > 0 ? games[gameCount - 1].gameID + 1 : 1;
-    fclose(f);
+    fclose(file);
 }
 
-
 void sortGames() {
-
     int choice;
-    printf("Sortirati igre po:\n1. Naziv\n2. Min oklada\n3. Max oklada\nOdabir: ");
-    scanf("%d", &choice);
-
+    printf("Sortirati igre po:\n1. Naziv\n2. Minimalni ulog\n3. Maksimalni ulog\nOdabir: ");
+    (void)scanf("%d", &choice);
 
     for (int i = 0; i < gameCount - 1; i++) {
         for (int j = 0; j < gameCount - i - 1; j++) {
@@ -194,4 +275,31 @@ void sortGames() {
 
     printf("Igre sortirane.\n");
     listGames();
+}
+
+
+void renameFile(const char* oldName, const char* newName) {
+    if (rename(oldName, newName) != 0) {
+        perror("Greška pri preimenovanju datoteke");
+    }
+    else {
+        printf("Datoteka uspješno preimenovana.\n");
+    }
+}
+
+void deleteFile(const char* filename) {
+    if (remove(filename) != 0) {
+        perror("Greška pri brisanju datoteke");
+    }
+    else {
+        printf("Datoteka uspješno obrisana.\n");
+    }
+}
+
+
+
+void sortPlayersWithFunctionPointer(CompareFunc cmp) {
+    qsort(players, playerCount, sizeof(Player), cmp);
+    printf("Igrači sortirani (funkcijskim pokazivačem):\n");
+    listPlayers();
 }
